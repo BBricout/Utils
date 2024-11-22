@@ -6,35 +6,35 @@ load("~/Code/Data_sim/trueTheta.Rdata")
 load("~/Code/Data_sim/Covariates.Rdata")
 
 
-X <- params$X
-X <- X[, c(1, 5, 9, 16)]
-theta <- trueTheta
-theta$B <- theta$B[c(1, 5, 9, 16)]
-theta$D <- theta$D[c(1, 5, 9, 16)]
-dim <- params$dim
-q <- dim$q
-n <- dim$n
-p <- dim$p
-d <- 4
-
-
-Y <- Simul(X, theta, dim)
-R <- ifelse(is.na(Y), 0, 1)
-B <- theta$B
-D <- theta$B
-C <- theta$C
-
-
-fit <- Miss.ZIPLNPCA(Y, X, q)
-M <- fit$eStep$M
-S <- fit$eStep$S  
-A <- fit$pred$A
-
-mu <- VectorToMatrix(X%*%B, n, p)
-nu <- VectorToMatrix(X%*%D, n, p)
-pi <- 1/(1 + exp(-nu))
-
-xi <- plogis(nu - R * A)
+# X <- params$X
+# X <- X[, c(1, 5, 9, 16)]
+# theta <- trueTheta
+# theta$B <- theta$B[c(1, 5, 9, 16)]
+# theta$D <- theta$D[c(1, 5, 9, 16)]
+# dim <- params$dim
+# q <- dim$q
+# n <- dim$n
+# p <- dim$p
+# d <- 4
+# 
+# 
+# Y <- Simul(X, theta, dim)
+# R <- ifelse(is.na(Y), 0, 1)
+# B <- theta$B
+# D <- theta$B
+# C <- theta$C
+# 
+# 
+# fit <- Miss.ZIPLNPCA(Y, X, q)
+# M <- fit$eStep$M
+# S <- fit$eStep$S  
+# A <- fit$pred$A
+# 
+# mu <- VectorToMatrix(X%*%B, n, p)
+# nu <- VectorToMatrix(X%*%D, n, p)
+# pi <- 1/(1 + exp(-nu))
+# 
+# xi <- plogis(nu - R * A)
 
 
 ## Hessienne de Theta 
@@ -43,7 +43,7 @@ grad2gamma <- function(xi, pi, X, n, p){
   indices <- lapply(1:n, function(i) 
     sapply(1:p-1, function(k) k * n + i))
   grad2 <- lapply(1:n, function(i)
-    sum(xi[i,] - pi[i,]) * t(X[indices[[i]],])%*%X[indices[[i]],])
+    sum(pi[i,]*(pi[i,] - 1)) * t(X[indices[[i]],])%*%X[indices[[i]],])
   return(grad2)
 }
 
@@ -60,7 +60,7 @@ grad2C <- function(R, xi, A, M, C, S, n, p){
   grad2 <- vector("list", p)
   for (j in 1:p){
     grad2[[j]] <- lapply(1:n, function(i)
-      R[i,j]*xi[i,j]*A[i,j] * (M[i,]%*%t(M[i,]) + 2 * (C[j,]*S[i,])%*%t(M[i,]) + (C[j,]*S[i,])%*%t(C[j,]*S[i,])))
+      - R[i,j]*xi[i,j]*A[i,j] * (M[i,]%*%t(M[i,]) + 2 * (C[j,]*S[i,])%*%t(M[i,]) + (C[j,]*S[i,])%*%t(C[j,]*S[i,]) + diag(S[i,])))
   }
   return(grad2)
 }
@@ -83,7 +83,7 @@ HessTheta <- function(Y, X, fit){
   B <- fit$mStep$beta ; D <- fit$mStep$gamma ; C <- fit$mStep$C
   M <- fit$eStep$M ; S <- fit$eStep$S ; A <- fit$pred$A  
   mu <- VectorToMatrix(X%*%B, n, p) ; nu <- VectorToMatrix(X%*%D, n, p)
-  pi <- 1/(1 + exp(-nu)) ; xi <- plogis(nu - R * A)
+  pi <- 1/(1 + exp(-nu)) ; xi <- fit$eStep$xi
   n <- nrow(Y) ; p <- ncol(Y) ; d <- ncol(X) ; q <- ncol(C)
   
   
@@ -123,18 +123,18 @@ HessTheta <- function(Y, X, fit){
 
 grad2M <- function(R, xi, A, C, n, q){
   grad <- lapply(1:n, function(i)
-    sum(R[i,] * xi[i,] * A[i,] ) * colSums(C) %*% t(colSums(C))  - diag(1, q, q))
+    - sum(R[i,] * xi[i,] * A[i,] ) * colSums(C) %*% t(colSums(C))  - diag(1, q, q))
   return(grad)
 }
 
 grad2S <- function(R, xi, A, C, S, n){
   grad <- lapply(1:n, function(i)
-    -0.5 * (S[i,]**(-1) %*% t(S[i,]**(-1)) + sum(R[i,] * xi[i,] * A[i,]) - colSums(C * C) %*% t(colSums(C *C))))
+    -0.5 * (S[i,]**(-1) %*% t(S[i,]**(-1)) + 0.5*sum(R[i,] * xi[i,] * A[i,]) - colSums(C * C) %*% t(colSums(C *C))))
   return(grad)
 }
 
 grad2xi <- function(xi, Y){
-  grad <- ifelse(Y == 0, (1 - xi)**(-1), 0)
+  grad <- ifelse(Y == 0, (xi*(1 - xi))**(-1), 0)
   return(grad)
   }
 
@@ -180,7 +180,7 @@ HessPhi <- function(Y, X, fit){
   B <- fit$mStep$beta ; D <- fit$mStep$gamma ; C <- fit$mStep$C
   M <- fit$eStep$M ; S <- fit$eStep$S ; A <- fit$pred$A  
   mu <- VectorToMatrix(X%*%B, n, p) ; nu <- VectorToMatrix(X%*%D, n, p)
-  pi <- 1/(1 + exp(-nu)) ; xi <- plogis(nu - R * A)
+  pi <- 1/(1 + exp(-nu)) ; xi <- fit$eStep$xi
   n <- nrow(Y) ; p <- ncol(Y) ; d <- ncol(X) ; q <- ncol(C)
   
   HessM <- grad2M(R, xi, A, C, n, q)
@@ -219,7 +219,7 @@ gradBM <- function(R, xi, A, C, X, n, p){
   indices <- lapply(1:n, function(i) 
     sapply(1:p-1, function(k) k * n + i))
   grad <- lapply(1:n, function(i)
-    sum(R[i,] * xi[i,] * A[i,]) * preptoX(colSums(C),p)%*%X[indices[[i]],])
+    -sum(R[i,] * xi[i,] * A[i,]) * preptoX(colSums(C),p)%*%X[indices[[i]],])
   return(grad)
 }
 
@@ -235,17 +235,17 @@ gradMC <- function(R, xi, A, Y, C, M, S, n, p, q){
   grad <- vector("list", p)
   for (j in 1:p){
     grad[[j]] <- lapply(1:n, function(i)
-      R[i,j]*xi[i,j]*(Y[i,j]*diag(1,q,q) - A[i,j]*(M[i,] + (C[j,]*S[i,]))%*%t(rep(1,q))))
+      R[i,j]*xi[i,j]*(Y[i,j]*diag(1,q,q) - A[i,j]*((M[i,] + S[i,]*C[j,])%*% t(C[j,])) + diag(1, q, q)))
   }
   return(grad)
 }
 
-gradSC <- function(R, xi, A, C, M, n, p){
+gradSC <- function(R, xi, A, C, M, S, n, p){
   grad <- vector("list", p)
   
   for (j in 1:p){
     grad[[j]] <- lapply(1:n, function(i)
-      -0.5 * R[i,j] * xi[i,j] * A[i,j] * (C[j,]*C[j,])%*%(t(M[i,]) + t(C[j,])))
+      R[i,j] * xi[i,j] * A[i,j] * (-0.5*(C[j,]*C[j,])%*%(t(M[i,]) + t(C[j,] * S[i,])) - diag(C[j,])))
   }
   
   return(grad)
@@ -308,13 +308,13 @@ HessPhiTheta <- function(Y, X, fit){
   B <- fit$mStep$beta ; D <- fit$mStep$gamma ; C <- fit$mStep$C
   M <- fit$eStep$M ; S <- fit$eStep$S ; A <- fit$pred$A  
   mu <- VectorToMatrix(X%*%B, n, p) ; nu <- VectorToMatrix(X%*%D, n, p)
-  pi <- 1/(1 + exp(-nu)) ; xi <- plogis(nu - R * A)
+  pi <- 1/(1 + exp(-nu)) ; xi <- fit$eStep$xi
   n <- nrow(Y) ; p <- ncol(Y) ; d <- ncol(X) ; q <- ncol(C)
   
   BM <- gradBM(R, xi, A, C, X, n, p)
   BS <- gradBS(R, xi, A, C, X, n, p)
   CM <- gradMC(R, xi, A, Y, C, M, S, n, p, q)
-  CS <- gradSC(R, xi, A, C, M, n, p)
+  CS <- gradSC(R, xi, A, C, M, S, n, p)
   GammaXi <- gradGammaXi(Y, X, n, p, d)
   BXi <- gradBxi(R, Y, A, X, n, p, d)
   Cxi <- gradCxi(R, Y, A, M, C, S, n, p)
@@ -382,7 +382,7 @@ D_theta <- function(Y, X, fit){
   B <- fit$mStep$beta ; D <- fit$mStep$gamma ; C <- fit$mStep$C
   M <- fit$eStep$M ; S <- fit$eStep$S ; A <- fit$pred$A  
   mu <- VectorToMatrix(X%*%B, n, p) ; nu <- VectorToMatrix(X%*%D, n, p)
-  pi <- 1/(1 + exp(-nu)) ; xi <- plogis(nu - R * A)
+  pi <- 1/(1 + exp(-nu)) ; xi <- fit$eStep$xi
   n <- nrow(Y) ; p <- ncol(Y) ; d <- ncol(X) ; q <- ncol(C)
   
   data <- list(Y = Y, R = R, X= X)
